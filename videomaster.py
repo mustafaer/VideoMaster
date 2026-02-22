@@ -3,7 +3,8 @@
 
 """
 VideoMaster - Apple Silicon Optimized Video Processor
-Hardware-accelerated video splitting, upscaling, and enhancement tool with dynamic bitrate scaling and auto-folder organization.
+Hardware-accelerated video splitting, upscaling, and enhancement tool.
+Features dual-engine encoding: HEVC (H.265) with dynamic bitrate and ProRes for professional editing.
 """
 
 import subprocess
@@ -14,14 +15,13 @@ import sys
 import math
 import shutil
 
-# --- CONFIGURATIONS (BASE BITRATES) ---
-# Format: "Choice": {"name": "Tag", "scale": "Resolution", "base_bitrate_mbps": Base Bitrate in Mbps}
+# --- CONFIGURATIONS (BASE BITRATES FOR HEVC) ---
 RESOLUTION_CONFIGS = {
     "1": {"name": "1080p", "scale": None, "base_bitrate_mbps": 30},
     "2": {"name": "2K", "scale": "2560:1440", "base_bitrate_mbps": 50},
     "3": {"name": "4K", "scale": "3840:2160", "base_bitrate_mbps": 100},
-    "4": {"name": "8K", "scale": "7680:4320", "base_bitrate_mbps": 200},    # ⚠️ Pushes Apple Silicon limits
-    "5": {"name": "16K", "scale": "15360:8640", "base_bitrate_mbps": 400}   # ⚠️ Experimental
+    "4": {"name": "8K", "scale": "7680:4320", "base_bitrate_mbps": 200},
+    "5": {"name": "16K", "scale": "15360:8640", "base_bitrate_mbps": 400}
 }
 
 DISK_LIMIT_PERCENT = 98.0
@@ -47,7 +47,6 @@ except ImportError:
 
 # --- HELPER FUNCTIONS ---
 def check_dependencies() -> bool:
-    """Checks if FFmpeg and FFprobe are installed on the system."""
     try:
         subprocess.run(["ffmpeg", "-version"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         subprocess.run(["ffprobe", "-version"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
@@ -56,19 +55,16 @@ def check_dependencies() -> bool:
         return False
 
 def format_time(seconds: float) -> str:
-    """Formats time in seconds to HH:MM:SS or MM:SS."""
     seconds = int(seconds)
     m, s = divmod(seconds, 60)
     h, m = divmod(m, 60)
     return f"{h:02d}:{m:02d}:{s:02d}" if h > 0 else f"{m:02d}:{s:02d}"
 
 def get_disk_usage() -> float:
-    """Returns the current working directory's disk usage as a percentage."""
     total, used, free = shutil.disk_usage(".")
     return (used / total) * 100
 
 def get_video_duration(video_path: str) -> float:
-    """Retrieves the total duration of the video in seconds."""
     cmd = ["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "default=noprint_wrappers=1:nokey=1", video_path]
     try:
         return float(subprocess.check_output(cmd, stderr=subprocess.STDOUT, text=True).strip())
@@ -76,7 +72,6 @@ def get_video_duration(video_path: str) -> float:
         return 0.0
 
 def parse_segments(input_str: str, max_segment: int) -> list:
-    """Parses user input like '1-5, 8' into a list: [1, 2, 3, 4, 5, 8]."""
     segments = set()
     parts = input_str.replace(' ', '').split(',')
     for part in parts:
@@ -131,20 +126,37 @@ def main():
             print("❌ ERROR: Invalid segment selection.")
             sys.exit(1)
 
+        print("\n⚙️  Select Target Codec Engine:")
+        print("1- HEVC / H.265 (High Quality, Small Size - Best for YouTube/Storage)")
+        print("2- Apple ProRes (Visually Lossless, Huge Size - Best for Heavy Editing)")
+        codec_choice = input("Your choice (1/2): ").strip()
+        is_prores = (codec_choice == "2")
+
         print("\n🚀 Select Base Resolution:")
         for key, val in RESOLUTION_CONFIGS.items():
-            print(f"{key}- {val['name'].ljust(6)} (Base Bitrate: {val['base_bitrate_mbps']} Mbps)")
+            print(f"{key}- {val['name'].ljust(6)}")
         res_choice = input("Your choice (1/2/3/4/5): ").strip()
 
-        # DYNAMIC BITRATE MULTIPLIER
-        mult_input = input("\n🔥 Enter Bitrate Multiplier (e.g., 1 for Base, 2 for High, 6 for Extreme 6x) [Default: 1]: ").strip()
+        config = RESOLUTION_CONFIGS.get(res_choice, RESOLUTION_CONFIGS["1"])
+        scale_val = config["scale"]
+        res_tag = config["name"]
 
-        try:
-            clean_mult = mult_input.lower().replace('x', '')
-            bitrate_multiplier = float(clean_mult) if clean_mult else 1.0
-        except ValueError:
-            print("⚠️ Warning: Invalid multiplier format. Defaulting to 1x.")
-            bitrate_multiplier = 1.0
+        # DYNAMIC BITRATE MULTIPLIER (Only for HEVC)
+        target_bitrate_str = None
+        multiplier_tag = ""
+
+        if not is_prores:
+            mult_input = input(f"\n🔥 Enter Bitrate Multiplier for {res_tag} (Base: {config['base_bitrate_mbps']} Mbps) [Default: 1]: ").strip()
+            try:
+                clean_mult = mult_input.lower().replace('x', '')
+                bitrate_multiplier = float(clean_mult) if clean_mult else 1.0
+            except ValueError:
+                print("⚠️ Warning: Invalid multiplier format. Defaulting to 1x.")
+                bitrate_multiplier = 1.0
+
+            final_bitrate_mbps = int(config["base_bitrate_mbps"] * bitrate_multiplier)
+            target_bitrate_str = f"{final_bitrate_mbps}M"
+            multiplier_tag = f"_{bitrate_multiplier}x" if bitrate_multiplier % 1 != 0 else f"_{int(bitrate_multiplier)}x"
 
         enhance_input = input("\n✨ Apply Visual & Audio Enhancements? (Y/N): ").strip().upper()
         use_enhancements = (enhance_input == 'Y')
@@ -153,22 +165,12 @@ def main():
         print("❌ ERROR: Numeric input required.")
         sys.exit(1)
 
-    config = RESOLUTION_CONFIGS.get(res_choice, RESOLUTION_CONFIGS["1"])
-    scale_val = config["scale"]
-    res_tag = config["name"]
-    base_bitrate = config["base_bitrate_mbps"]
-
-    # Calculate Final Bitrate
-    final_bitrate_mbps = int(base_bitrate * bitrate_multiplier)
-    target_bitrate_str = f"{final_bitrate_mbps}M"
-    multiplier_tag = f"{bitrate_multiplier}x" if bitrate_multiplier % 1 != 0 else f"{int(bitrate_multiplier)}x"
-
     segment_seconds = segment_length_min * 60
     time_pattern = re.compile(r"time=(\d+):(\d+):(\d+\.\d+)")
 
-    print(f"\n⚙️  Processing Started... Mode: {res_tag} ({multiplier_tag} -> {target_bitrate_str}) | Enhancements: {'ON' if use_enhancements else 'OFF'}")
+    codec_display_name = "ProRes 422" if is_prores else f"HEVC {target_bitrate_str}"
+    print(f"\n⚙️  Processing Started... Mode: {res_tag} | Engine: {codec_display_name} | Enhancements: {'ON' if use_enhancements else 'OFF'}")
 
-    # Create Output Directory
     os.makedirs(OUTPUT_FOLDER, exist_ok=True)
     print(f"📁 All outputs will be saved to: ./{OUTPUT_FOLDER}/")
     print("-" * 65)
@@ -179,20 +181,34 @@ def main():
             break
 
         start_time_sec = (seg_no - 1) * segment_seconds
-        output_filename = f"Master_{res_tag}_{multiplier_tag}_Part_{seg_no}.mp4"
+
+        # Extension and filename logic
+        ext = "mov" if is_prores else "mp4"
+        codec_tag = "ProRes" if is_prores else f"HEVC{multiplier_tag}"
+        output_filename = f"Master_{res_tag}_{codec_tag}_Part_{seg_no}.{ext}"
         output_filepath = os.path.join(OUTPUT_FOLDER, output_filename)
 
-        # FFmpeg Command Array (Apple Silicon HEVC Optimized)
         cmd = [
             "ffmpeg", "-hide_banner",
             "-ss", str(start_time_sec), "-i", video_path,
-            "-t", str(segment_seconds),
-            "-c:v", "hevc_videotoolbox",
-            "-b:v", target_bitrate_str,
-            "-tag:v", "hvc1",           # Crucial for Apple QuickTime compatibility
-            "-pix_fmt", "yuv420p",      # Universal color space
-            "-fps_mode", "cfr", "-r", "60"
+            "-t", str(segment_seconds)
         ]
+
+        # Engine specific arguments
+        if is_prores:
+            cmd.extend([
+                "-c:v", "prores_videotoolbox",
+                "-profile:v", "3",          # ProRes 422 HQ
+                "-fps_mode", "cfr", "-r", "60"
+            ])
+        else:
+            cmd.extend([
+                "-c:v", "hevc_videotoolbox",
+                "-b:v", target_bitrate_str,
+                "-tag:v", "hvc1",
+                "-pix_fmt", "yuv420p",
+                "-fps_mode", "cfr", "-r", "60"
+            ])
 
         # Video Filters
         vf = []
@@ -204,7 +220,7 @@ def main():
         if vf:
             cmd.extend(["-vf", ",".join(vf)])
 
-        # Audio Filters & Codec
+        # Audio Filters
         if use_enhancements:
             cmd.extend(["-c:a", "aac", "-b:a", "320k", "-af", "compand=attacks=0:points=-30/-30|-20/-15|-10/-10|0/-8,volume=1.2"])
         else:
@@ -212,7 +228,7 @@ def main():
 
         cmd.extend([output_filepath, "-y"])
 
-        print(f"💎 Rendering: {output_filename} (@{target_bitrate_str})")
+        print(f"💎 Rendering: {output_filename}")
         start_t = time.time()
 
         try:
