@@ -1,66 +1,91 @@
-# VideoMaster: Apple Silicon Video Processor 🎬
+# VideoMaster
 
-![Python](https://img.shields.io/badge/python-3.x-blue.svg)
-![macOS](https://img.shields.io/badge/os-macOS-silver)
-![FFmpeg](https://img.shields.io/badge/ffmpeg-required-green)
-![License](https://img.shields.io/badge/license-MIT-blue)
+Split a local recording into numbered clips on an Apple Silicon Mac, or transcode the whole file. VideoMaster uses FFmpeg and Apple’s VideoToolbox encoders. Choose **HEVC in MP4** for delivery or **ProRes 422 HQ in MOV** for editing. Both formats re-encode the video.
 
-**VideoMaster** is a production-ready, CLI-based video processing tool specifically optimized for Mac computers featuring Apple Silicon (M1, M2, M3 series). It utilizes the hardware-accelerated Media Engine to split, upscale, and enhance massive video files with zero loss in visual fidelity and incredibly fast render times.
+## First export
 
-## ✨ Key Features
+You need Python 3.9 or newer and FFmpeg with its companion tool, `ffprobe`. VideoMaster uses the Python standard library. On a Mac with Homebrew, you can install the prerequisites with `brew install python ffmpeg`.
 
-* **Dual-Engine Architecture:** Choose between **HEVC (H.265)** with dynamic bitrate scaling for efficient storage and delivery, or **Apple ProRes 422 HQ** for buttery-smooth timeline scrubbing in professional Non-Linear Editors (NLEs).
-* **Apple Silicon Hardware Acceleration:** Leverages `hevc_videotoolbox` and `prores_videotoolbox` to encode videos at blazing speeds without maxing out CPU thermals.
-* **Dynamic Bitrate Scaling (HEVC):** Forget hardcoded limits. Choose a base resolution and input any custom multiplier (e.g., `2x`, `3.5x`, `6x`) to perfectly balance file size and visual fidelity on the fly.
-* **Organized Exports:** Automatically saves all generated segments into a dedicated `VideoMaster_Exports` folder in your current working directory to keep your workspace clean.
-* **Smart Disk Protection:** Continuously monitors your hard drive. If disk usage hits 98%, the script automatically halts processing to prevent macOS system crashes.
-* **Targeted Segmentation:** Easily slice long videos (e.g., 4-hour recordings) into equal chunks. Process the whole video or select specific segments (e.g., `1-3, 5, 8-10`).
-* **Extreme Resolution Upscaling:** Supports native 1080p all the way up to experimental **16K (8640p)** using high-fidelity Lanczos filtering.
-* **A/V Enhancement Pipeline:** Optional built-in filters to sharpen visual textures, boost color saturation, and dynamically compress audio for clear voiceovers over loud gameplay.
-* **QuickTime Compatibility:** Enforces `hvc1` tags and `yuv420p` pixel formats to ensure HEVC files play natively on macOS without black screens or missing video tracks.
-* **Terminal UX:** Includes interactive CLI elements, live progress bars, tab-completion for file paths, and graceful keyboard interrupts.
+Download the project and start the guided exporter. If you already have the project, run the last command from its directory.
 
-## ⚙️ Prerequisites
-
-You need `python3` and `ffmpeg` installed on your Mac. The easiest way to install FFmpeg is via Homebrew:
-
-```bash
-brew install ffmpeg
+```sh
+git clone https://github.com/mustafaer/VideoMaster.git
+cd VideoMaster
+python3 videomaster.py
 ```
 
-## 🚀 Quick Start
+Drop a video from Finder into the path prompt and press Enter. You can also type the path or use Tab to complete it. Press Enter at the remaining prompts to export the whole recording as one HEVC file with source dimensions, source frame timing, and enhancements off.
 
-1. Clone or download this repository.
-2. Make the script executable (optional but recommended):
-   ```bash
-   chmod +x videomaster.py
-   ```
-3. Run the script:
-   ```bash
-   python3 videomaster.py
-   ```
-4. Drag and drop your video file into the terminal (or type the path using the TAB key to autocomplete).
-5. Follow the interactive prompts to select your codec, split length, upscaling resolution, and bitrate multipliers.
+For an input named `match.mov`, the first default export lands here, relative to the directory where you launched the script.
 
-## 🧠 Under the Hood: Bitrate Architecture
+```text
+VideoMaster_Exports/
+└── match_source_hevc/
+    └── Part_0001.mp4
+```
 
-To maintain "Mastering" quality while giving you full control over file sizes, VideoMaster uses a **Base Bitrate * Multiplier** approach for HEVC encoding:
-- **1080p Base:** 30 Mbps
-- **2K Base:** 50 Mbps
-- **4K Base:** 100 Mbps
-- **8K / 16K Base:** 200+ Mbps
+## Command-line examples
 
-When prompted, you can enter multipliers like `1` (for base storage), `2` (for high quality), or `6x` (for extreme archival quality).
+**Keep the opening and closing clips.** For a 25-minute recording, the following command saves minutes 0–10 as `Part_0001.mp4` and minutes 20–25 as `Part_0003.mp4`. At 1080p, the 1.5× multiplier sets a 45 Mbps video target.
 
-*Note: If you select ProRes, the bitrate multiplier is bypassed, as ProRes 422 HQ relies on fixed-profile bitrates.*
+```sh
+python3 videomaster.py "match.mov" --segment-minutes 10 --segments 1,3 \
+  --resolution 1080p --bitrate-multiplier 1.5x
+```
 
-## ⚠️ Known Limitations
-- Pushing resolutions to 8K or 16K may hit Apple API hardware limits depending on your exact M-series chip. If hardware encoding fails, FFmpeg may attempt fallback software encoding or throw an error.
-- ProRes files are massive. Ensure you have ample disk space before running a ProRes batch.
+Segment numbers start at 1. Use positive whole minutes for the segment length. A selection can contain numbers, inclusive ranges such as `1-3,5`, or `all`. Omitting `--segments` exports every part. Omitting `--segment-minutes` treats the entire video as part 1.
 
-## 🛡️ License
+**Prepare an editing copy.** This exports the entire recording as ProRes 422 HQ at a constant 30000/1001 fps (about 29.97 fps) under `Editing Exports/`. Omit `--fps` to keep the source timing, including variable frame rates.
 
-Distributed under the MIT License. See `LICENSE` for more information.
+```sh
+python3 videomaster.py "match.mov" --codec prores \
+  --fps 30000/1001 --output-dir "Editing Exports"
+```
 
----
-*Built to tame massive gameplay files, render faster, and keep your disk space sane.*
+Run `python3 videomaster.py --help` for the full option list.
+
+## Picture and sound
+
+| `--resolution` | Output canvas | HEVC target at 1× |
+| --- | --- | ---: |
+| `source` (default) | Source dimensions | 30 Mbps |
+| `1080p` | 1920 × 1080 | 30 Mbps |
+| `2k` | 2560 × 1440 | 50 Mbps |
+| `4k` | 3840 × 2160 | 100 Mbps |
+| `8k` | 7680 × 4320 | 200 Mbps |
+| `16k` | 15360 × 8640 | 400 Mbps |
+
+With `source`, an odd width or height gains one pixel of padding. Fixed canvases use Lanczos scaling and center the picture with black bars wherever needed to preserve its display aspect ratio. For example, a portrait clip can stay portrait with `source`, or fit inside a landscape frame with `1080p`.
+
+- **HEVC** uses 8-bit 4:2:0 video with the QuickTime-compatible `hvc1` tag. The bitrate multiplier applies to HEVC only. Actual bitrate and file size depend on the footage and encoder.
+- **ProRes** uses the 10-bit 4:2:2 HQ profile. Allow extra disk space for editing copies.
+- **Tracks** include the first video stream (excluding cover art) and all audio streams, each encoded as AAC with a 320 kbps target. Silent footage stays silent. Exports omit subtitles, chapters, attachments, and additional video angles.
+- **Enhancements** are optional. Add `--enhance` to sharpen the image, raise saturation, compress audio dynamics, and boost volume.
+
+## Recover an interrupted export
+
+Look for the `Saved … of …` summary and the run directory it names. Each finished clip is moved into place after `ffprobe` confirms the expected codec, a positive duration, and at least one encoded frame. On an encoder error or cancellation, VideoMaster stops the batch and cleans up the current temporary clip.
+
+To retry, use the same input, segment length, and encoding options, then select the missing part numbers. For example, if part 1 of the HEVC example succeeded and part 3 failed, rerun it with `--segments 3`. The retry writes `Part_0003.mp4` in `match_1080p_hevc_2/`. Earlier clips keep their original paths, including when two exports run concurrently.
+
+| Symptom | What to check |
+| --- | --- |
+| Missing `ffmpeg` or `ffprobe` | Run `ffmpeg -version` and `ffprobe -version` in the same terminal used to launch VideoMaster. Both executables must be on `PATH`. |
+| FFmpeg cannot open the encoder | Run `ffmpeg -hide_banner -encoders` and look for `hevc_videotoolbox` or `prores_videotoolbox` for your chosen codec. If it is listed, try a smaller canvas to check whether frame size is the limit. |
+| Output volume reaches 98% usage | Free space or choose another volume with `--output-dir`, then retry the missing parts. The exporter checks the destination before and after each encode and at half-second intervals during encoding. |
+
+For scripts, exit status `0` means the batch completed. Status `1` indicates an input or export failure, `2` a command-line argument error, `130` Ctrl-C or a closed input prompt, and `143` SIGTERM.
+
+## Tests and hardware coverage
+
+From the project directory, run the regression suite with `python3 -m unittest -v`. On a Mac with both hardware encoders, the following command also runs the HEVC and ProRes export tests.
+
+```sh
+VIDEOMASTER_HARDWARE_TESTS=1 python3 -m unittest -v
+```
+
+Both codecs were verified with FFmpeg 9.0.2 on Apple Silicon, including two-frame exports at 2K, 4K, and 8K. These checks cover encoder compatibility. Sustained 8K performance and the 16K preset remain unverified.
+
+## License
+
+VideoMaster is distributed under the [MIT License](LICENSE).
